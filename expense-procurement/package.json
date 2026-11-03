@@ -1,0 +1,20 @@
+{
+  "name": "expense-procurement",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Expense and procurement platform: policy-driven approvals, financial integrity, immutable audit, and a governed agent harness.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "tsx --test tests/*.test.ts",
+    "test:watch": "tsx --test --watch tests/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "tsx": "^4.23.15",
+    "typescript": "^5.7.2"
+  }
+}

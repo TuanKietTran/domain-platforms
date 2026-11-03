@@ -1,0 +1,19 @@
+{
+  "name": "@platform/helpdesk",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Multi-tenant customer support platform: ticket lifecycle, SLA, routing, knowledge retrieval, audit trail and a reusable AI agent harness.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --test dist/tests dist/src/parallel"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0"
+  }
+}
