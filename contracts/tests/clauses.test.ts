@@ -53,3 +53,36 @@ test('playbook deviations: preferred none, fallback minor, unacceptable/missing 
   ] });
   assert.deepEqual(bad.map((d) => d.severity), ['major', 'major']); // unacceptable wording + missing clause
 });
+
+test('playbook upsert versions, validates positions, and is tenant-scoped', () => {
+  const { w, pb } = setup();
+  const pos = [{ clauseKey: 'liability', preferred: 'capped at fees paid', fallback: 'capped at 12 months of fees', unacceptable: 'unlimited liability', note: '' }];
+  assert.equal(pb.upsertPlaybook(w.counselCtx, { key: 'std', title: 'Standard', positions: pos }).version, 1);
+  assert.equal(pb.upsertPlaybook(w.counselCtx, { key: 'std', title: 'Standard v2', positions: pos }).version, 2);
+  assert.equal(pb.listPlaybooks(w.viewerCtx).length, 1);
+  assert.throws(() => pb.getPlaybook(w.outsiderCtx, 'std'), (e: unknown) => e instanceof DomainError && e.code === 'NOT_FOUND');
+  assert.throws(() => pb.upsertPlaybook(w.counselCtx, { key: 'bad', title: 'Bad', positions: [] }), (e: unknown) => e instanceof DomainError && e.code === 'VALIDATION');
+  assert.throws(() => pb.upsertPlaybook(w.counselCtx, { key: 'bad', title: 'Bad', positions: [{ clauseKey: 'x', preferred: '', fallback: 'f', unacceptable: '', note: '' }] }), (e: unknown) => e instanceof DomainError && e.code === 'VALIDATION');
+  assert.throws(() => pb.upsertPlaybook(w.viewerCtx, { key: 'no', title: 'No', positions: pos }), (e: unknown) => e instanceof DomainError && e.code === 'FORBIDDEN');
+});
+
+test('clause list filters by category; template re-upsert bumps version; materialize uses latest clause body', () => {
+  const { w, lib } = setup();
+  lib.upsertClause(w.counselCtx, { key: 'confidentiality', title: 'Confidentiality', body: 'v1 body', category: 'boilerplate', riskLevel: 'low' });
+  lib.upsertClause(w.counselCtx, { key: 'term', title: 'Term', body: '12 months', category: 'commercial', riskLevel: 'medium' });
+  assert.deepEqual(lib.listClauses(w.viewerCtx, 'boilerplate').map((c) => c.key), ['confidentiality']);
+  assert.equal(lib.listClauses(w.viewerCtx).length, 2);
+  lib.upsertTemplate(w.counselCtx, { key: 'msa', title: 'MSA', clauseKeys: ['confidentiality'] });
+  assert.equal(lib.upsertTemplate(w.counselCtx, { key: 'msa', title: 'MSA', clauseKeys: ['confidentiality', 'term'] }).version, 2);
+  lib.upsertClause(w.counselCtx, { key: 'confidentiality', title: 'Confidentiality', body: 'v2 body', category: 'boilerplate', riskLevel: 'low' });
+  assert.equal(lib.materialize(w.viewerCtx, 'msa').clauses[0]?.body, 'v2 body');
+});
+
+test('deviation matching is case/whitespace-insensitive; unmatched wording is major', () => {
+  const { w, pb } = setup();
+  pb.upsertPlaybook(w.counselCtx, { key: 'std', title: 'Standard', positions: [{ clauseKey: 'liability', preferred: 'Liability is capped at fees paid', fallback: 'capped at 12 months', unacceptable: '', note: '' }] });
+  const ok = pb.assessDeviations(w.viewerCtx, 'std', { title: 'T', clauses: [{ id: 'liability', heading: 'Liability', body: 'liability   IS capped\n at fees paid.' }] });
+  assert.equal(ok[0]?.severity, 'none');
+  const odd = pb.assessDeviations(w.viewerCtx, 'std', { title: 'T', clauses: [{ id: 'liability', heading: 'Liability', body: 'Liability is uncapped and perpetual.' }] });
+  assert.deepEqual([odd[0]?.severity, odd[0]?.detail], ['major', 'matches neither preferred nor fallback position']);
+});

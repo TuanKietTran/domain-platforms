@@ -10,4 +10,5 @@ export * from './documents/index.ts';
 export * from './obligations/dates.ts';
 export * from './obligations/index.ts';
 export * from './risk/index.ts';
+export * from './clauses/index.ts';
 export * from './harness/index.ts';
