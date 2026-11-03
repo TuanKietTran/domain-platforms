@@ -9,6 +9,7 @@ import type { AccessContext, Role } from '../identity/index.ts';
 import { assertTenant, requirePermission } from '../identity/index.ts';
 import type { AuditLog } from '../audit/index.ts';
 import type { ContractContent } from '../versioning/index.ts';
+import type { ClauseDeviation } from '../clauses/types.ts';
 
 export interface RiskSignal { readonly rule: string; readonly points: number; readonly evidence: string; }
 export interface RiskAssessment { readonly score: number; readonly band: 'low' | 'medium' | 'high' | 'critical'; readonly signals: readonly RiskSignal[]; }
@@ -22,6 +23,8 @@ const PATTERNS: { rule: string; points: number; re: RegExp; label: string }[] = 
   { rule: 'governing_law_foreign', points: 10, re: /governed by the laws of (?!Vietnam)/i, label: 'foreign governing law' },
 ];
 
+const bandFor = (score: number): RiskAssessment['band'] => (score >= 60 ? 'critical' : score >= 35 ? 'high' : score >= 15 ? 'medium' : 'low');
+
 export function assessRisk(content: ContractContent, meta: { valueMinor?: number; termMonths?: number } = {}): RiskAssessment {
   const text = [content.title, ...content.clauses.map((c) => `${c.heading}\n${c.body}`)].join('\n');
   const signals: RiskSignal[] = [];
@@ -32,8 +35,26 @@ export function assessRisk(content: ContractContent, meta: { valueMinor?: number
   if ((meta.valueMinor ?? 0) >= 100_000_00) signals.push({ rule: 'high_value', points: 10, evidence: 'contract value >= 100,000 major units' });
   if ((meta.termMonths ?? 0) > 36) signals.push({ rule: 'long_term', points: 10, evidence: 'term longer than 36 months' });
   const score = Math.min(100, signals.reduce((s, x) => s + x.points, 0));
-  const band = score >= 60 ? 'critical' : score >= 35 ? 'high' : score >= 15 ? 'medium' : 'low';
-  return { score, band, signals };
+  return { score, band: bandFor(score), signals };
+}
+
+/** Playbook deviation points: a major deviation (unacceptable wording or a
+ * missing required clause) outweighs any single content pattern except
+ * unlimited liability; a minor deviation (fallback wording only) is a nudge. */
+export const DEVIATION_POINTS: Readonly<Record<'minor' | 'major', number>> = { minor: 5, major: 20 };
+
+export function applyDeviations(assessment: RiskAssessment, deviations: readonly ClauseDeviation[]): RiskAssessment {
+  const extra: RiskSignal[] = deviations
+    .filter((d): d is ClauseDeviation & { severity: 'minor' | 'major' } => d.severity !== 'none')
+    .map((d) => ({ rule: `playbook_deviation_${d.severity}`, points: DEVIATION_POINTS[d.severity], evidence: `${d.clauseKey}: ${d.detail}` }));
+  if (extra.length === 0) return assessment;
+  const signals = [...assessment.signals, ...extra];
+  const score = Math.min(100, signals.reduce((s, x) => s + x.points, 0));
+  return { score, band: bandFor(score), signals };
+}
+
+export function assessWithDeviations(content: ContractContent, deviations: readonly ClauseDeviation[], meta: { valueMinor?: number; termMonths?: number } = {}): RiskAssessment {
+  return applyDeviations(assessRisk(content, meta), deviations);
 }
 
 export function requiredApprovers(assessment: RiskAssessment, valueMinor = 0): Role[] {
@@ -74,8 +95,12 @@ export class ApprovalService {
     assertTenant(ctx, r.tenantId);
     requirePermission(ctx, 'contract:approve');
     if (r.status !== 'pending') throw new DomainError('CONFLICT', `approval already ${r.status}`);
-    const role = r.requiredRoles.find((x) => ctx.roles.includes(x))
-      ?? (ctx.roles.includes('admin') ? r.requiredRoles.find((x) => !r.decisions.some((d) => d.role === x && d.decision === 'approved')) : undefined);
+    // Prefer a required role that is not yet satisfied, so a decider holding
+    // several roles fills an open slot instead of duplicating a filled one.
+    const satisfied = new Set(r.decisions.filter((d) => d.decision === 'approved').map((d) => d.role));
+    const role = r.requiredRoles.find((x) => ctx.roles.includes(x) && !satisfied.has(x))
+      ?? (ctx.roles.includes('admin') ? r.requiredRoles.find((x) => !satisfied.has(x)) : undefined)
+      ?? r.requiredRoles.find((x) => ctx.roles.includes(x));
     if (!role) throw new DomainError('FORBIDDEN', 'decider holds none of the required roles', { requiredRoles: r.requiredRoles });
     if (r.decisions.some((d) => d.userId === ctx.userId)) throw new DomainError('CONFLICT', 'user already decided');
     const decisions = [...r.decisions, { userId: ctx.userId, role, decision, at: this.#clock.now().toISOString(), note }];

@@ -6,6 +6,7 @@ import { ContractService } from '../src/lifecycle/index.ts';
 import { DocumentService, MemoryBlobStore } from '../src/documents/index.ts';
 import { ObligationService } from '../src/obligations/index.ts';
 import { ApprovalService } from '../src/risk/index.ts';
+import { PlaybookService } from '../src/clauses/playbook.ts';
 
 export interface World {
   clock: FakeClock; audit: AuditLog; directory: Directory;
@@ -14,6 +15,7 @@ export interface World {
   adminCtx: AccessContext; counselCtx: AccessContext; contributorCtx: AccessContext; viewerCtx: AccessContext; outsiderCtx: AccessContext;
   versions: VersionStore; contracts: ContractService; documents: DocumentService;
   obligations: ObligationService; approvals: ApprovalService;
+  playbooks: PlaybookService; gatedContracts: ContractService;
 }
 
 export function makeWorld(): World {
@@ -28,6 +30,7 @@ export function makeWorld(): World {
   const viewer = directory.createUser(tenant.id, 'view@acme.test', 'Viewer', ['viewer']);
   const outsider = directory.createUser(otherTenant.id, 'out@other.test', 'Outsider', ['admin']);
   const versions = new VersionStore(clock);
+  const approvals = new ApprovalService({ clock, audit });
   return {
     clock, audit, directory, tenant, otherTenant, admin, counsel, contributor, viewer, outsider,
     adminCtx: contextFor(admin), counselCtx: contextFor(counsel), contributorCtx: contextFor(contributor),
@@ -36,7 +39,9 @@ export function makeWorld(): World {
     contracts: new ContractService({ clock, audit, versions }),
     documents: new DocumentService({ blobs: new MemoryBlobStore(), clock, audit }),
     obligations: new ObligationService({ clock, audit }),
-    approvals: new ApprovalService({ clock, audit }),
+    approvals,
+    playbooks: new PlaybookService({ clock, audit }),
+    gatedContracts: new ContractService({ clock, audit, versions, approvals }),
   };
 }
 

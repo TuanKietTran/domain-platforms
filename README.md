@@ -6,9 +6,9 @@ Three production-minded business platforms, each a strictly typed TypeScript lib
 
 | Platform | What it covers | Tests |
 | --- | --- | --- |
-| [`helpdesk/`](helpdesk) | Customer support: ticket state machine and SLA engine, explainable routing, knowledge retrieval with citations, agent harness, channels, notifications, automation, analytics, QA | 118 passing |
-| [`contracts/`](contracts) | Legal / contract management: lifecycle state machine, versioning and provenance, obligation and date engine, clauses and playbooks, risk and approval matrix, collaboration, repository and legal hold | 59 passing |
-| [`expense-procurement/`](expense-procurement) | Expenses and purchasing: approval workflow state machine, versioned policy engine, identity and permissions, audit trail, and financial integrity (money type, double-entry ledger, idempotent payments, reconciliation, three-way match) | 92 passing |
+| [`helpdesk/`](helpdesk) | Customer support: ticket state machine and SLA engine, explainable routing, knowledge retrieval with citations, agent harness, channels, notifications, automation, analytics, QA | 122 passing |
+| [`contracts/`](contracts) | Legal / contract management: lifecycle state machine, versioning and provenance, obligation and date engine, clauses and playbooks, risk gate wired into approvals, version redlining, documents | 73 passing |
+| [`expense-procurement/`](expense-procurement) | Expenses and purchasing: approval workflow state machine, versioned policy engine, identity and permissions, audit trail, document evidence model with content hashing, and financial integrity (money type, double-entry ledger, idempotent payments, reconciliation, three-way match) | 120 passing |
 
 Each platform has its own `docs/DOMAIN-MAP.md` (domains mapped to modules, what is deep and what is parallel, success-criteria checks) where available.
 

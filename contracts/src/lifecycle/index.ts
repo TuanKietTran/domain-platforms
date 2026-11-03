@@ -9,6 +9,8 @@ import type { AccessContext } from '../identity/index.ts';
 import { assertTenant, requirePermission } from '../identity/index.ts';
 import type { AuditLog } from '../audit/index.ts';
 import { VersionStore, type ContractContent } from '../versioning/index.ts';
+import { assessRisk, assessWithDeviations, requiredApprovers, type ApprovalService } from '../risk/index.ts';
+import type { PlaybookService } from '../clauses/playbook.ts';
 
 export const CONTRACT_STATES = [
   'draft', 'in_review', 'approved', 'sent_for_signature', 'signed',
@@ -41,7 +43,17 @@ export interface Contract {
   readonly createdAt: string; readonly updatedAt: string;
 }
 
-export interface ContractServiceDeps { clock: Clock; audit: AuditLog; versions: VersionStore; }
+export interface ContractServiceDeps {
+  clock: Clock; audit: AuditLog; versions: VersionStore;
+  /** When set, the -> approved transition is gated: a completed approval
+   * request covering requiredApprovers(assessRisk(current content)) must
+   * exist first. When unset, transitions keep permission-only behaviour. */
+  approvals?: ApprovalService;
+  /** Optional playbook scoring for the gate: deviations from this playbook
+   * are folded into the risk assessment before the matrix is computed. */
+  playbooks?: PlaybookService;
+  playbookKey?: string;
+}
 
 export class ContractService {
   #contracts = new Map<ContractId, Contract>();
@@ -96,12 +108,25 @@ export class ContractService {
     return updated;
   }
 
-  transition(ctx: AccessContext, id: ContractId, to: ContractState, opts: { effectiveAt?: string; expiresAt?: string } = {}): Contract {
+  transition(ctx: AccessContext, id: ContractId, to: ContractState, opts: { effectiveAt?: string; expiresAt?: string; valueMinor?: number; termMonths?: number } = {}): Contract {
     const c = this.get(ctx, id);
     if (!canTransition(c.state, to))
       throw new DomainError('INVALID_TRANSITION', `cannot transition ${c.state} -> ${to}`, { from: c.state, to, allowed: TRANSITIONS[c.state] });
     const perm = to === 'approved' ? 'contract:approve' : to === 'signed' ? 'contract:sign' : 'contract:write';
     requirePermission(ctx, perm);
+    if (to === 'approved' && this.#deps.approvals) {
+      const content = this.#deps.versions.current(id).content;
+      const meta: { valueMinor?: number; termMonths?: number } = {
+        ...(opts.valueMinor !== undefined ? { valueMinor: opts.valueMinor } : {}),
+        ...(opts.termMonths !== undefined ? { termMonths: opts.termMonths } : {}),
+      };
+      const assessment = this.#deps.playbooks && this.#deps.playbookKey
+        ? assessWithDeviations(content, this.#deps.playbooks.assessDeviations(ctx, this.#deps.playbookKey, content), meta)
+        : assessRisk(content, meta);
+      const required = requiredApprovers(assessment, opts.valueMinor ?? 0);
+      if (!this.#deps.approvals.approvedFor(ctx, id, required))
+        throw new DomainError('APPROVAL_REQUIRED', 'approval gate: no completed approval covers the required roles for this risk level', { requiredRoles: required, band: assessment.band, score: assessment.score });
+    }
     const now = this.#deps.clock.now().toISOString();
     const updated: Contract = {
       ...c, state: to, updatedAt: now,
